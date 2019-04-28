@@ -3,6 +3,8 @@ package oidc.common;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
+import java.util.Date;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -14,14 +16,28 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.proc.BadJOSEException;
+import com.nimbusds.jwt.JWT;
 import com.nimbusds.oauth2.sdk.ParseException;
+import com.nimbusds.oauth2.sdk.RefreshTokenGrant;
 import com.nimbusds.oauth2.sdk.TokenIntrospectionRequest;
 import com.nimbusds.oauth2.sdk.TokenIntrospectionResponse;
+import com.nimbusds.oauth2.sdk.TokenRequest;
+import com.nimbusds.oauth2.sdk.TokenResponse;
 import com.nimbusds.oauth2.sdk.auth.ClientAuthentication;
 import com.nimbusds.oauth2.sdk.auth.ClientSecretBasic;
 import com.nimbusds.oauth2.sdk.auth.Secret;
 import com.nimbusds.oauth2.sdk.id.ClientID;
+import com.nimbusds.oauth2.sdk.id.Issuer;
 import com.nimbusds.oauth2.sdk.token.BearerAccessToken;
+import com.nimbusds.openid.connect.sdk.Nonce;
+import com.nimbusds.openid.connect.sdk.OIDCTokenResponse;
+import com.nimbusds.openid.connect.sdk.OIDCTokenResponseParser;
+import com.nimbusds.openid.connect.sdk.validators.IDTokenValidator;
+
+import net.minidev.json.JSONObject;
 
 public class OidcSecurityFilter implements Filter
 {
@@ -59,9 +75,11 @@ public class OidcSecurityFilter implements Filter
 							clientAuth, accessToken);
 				TokenIntrospectionResponse tokenIntroResponse = TokenIntrospectionResponse.parse(tokenIntroRequest.toHTTPRequest().send());
 				if (tokenIntroResponse.indicatesSuccess()) {
+					// 認証OK
 					chain.doFilter(request, response);
 				} else {
-					((HttpServletResponse)response).sendError(500);
+					// 認証エラー
+					((HttpServletResponse)response).sendError(401);
 				}
 		    } if (session != null){
 		    	synchronized (session) {
@@ -71,30 +89,53 @@ public class OidcSecurityFilter implements Filter
 					    // 認証エラー(認可とトークンリクエストをしていない)
 				    	httpRes.sendError(401);
 			    	}
+			    	JSONObject jsonObject = OidcUtils.getAccessTokenPayload(securityContext.getAccessToken());
 
-			    	// 残り時間が120秒以下であったら更新する
+			    	long now = new Date().getTime();
+			    	long exp = Long.parseLong(String.valueOf(jsonObject.get("exp"))) * 1000;
 
+			    	if (exp - now <= 120 * 1000L) {
+			    		// 残り120秒で執行する
+			    		// トークンリフレッシュ
+						TokenRequest tokenRefreshRequest = new TokenRequest(new URI(opConfig.getTokenEndPoint()),
+								new ClientSecretBasic(new ClientID(opConfig.getClientId()), new Secret(opConfig.getClientSecret())),
+								new RefreshTokenGrant(securityContext.getRefreshToken()));
 
-			    	// 更新エラー
-				}
+						TokenResponse tokenResponse = OIDCTokenResponseParser.parse(tokenRefreshRequest.toHTTPRequest().send());
+
+						if (! tokenResponse.indicatesSuccess()) {
+							((HttpServletResponse)response).sendError(401);
+						}
+						OIDCTokenResponse successResponse = (OIDCTokenResponse)tokenResponse.toSuccessResponse();
+
+						// IDトークンバリデーション
+						JWT idToken = successResponse.getOIDCTokens().getIDToken();
+						if (idToken != null) {
+							// nonce
+							String nonceInSession = (String) session.getAttribute(OidcConst.SESSION_OIDC_NONCE);
+							if (nonceInSession == null) {
+								((HttpServletResponse)response).sendError(401);
+							}
+							IDTokenValidator idTokenValidator = new IDTokenValidator(new Issuer(opConfig.getIssuer()),
+									new ClientID(opConfig.getClientId()),
+									JWSAlgorithm.RS256, new URL(opConfig.getJwksUri()));
+							idTokenValidator.validate(idToken, new Nonce(nonceInSession));
+						}
+						securityContext.setAccessToken(successResponse.getOIDCTokens().getAccessToken());
+						securityContext.setRefreshToken(successResponse.getOIDCTokens().getRefreshToken());
+			    	}
+		    	}
+		    	chain.doFilter(request, response);
 		    } else {
 			    // 認証エラー
 		    	httpRes.sendError(401);
 		    }
-		} catch (URISyntaxException | ParseException e) {
+		} catch (URISyntaxException | ParseException | java.text.ParseException | BadJOSEException | JOSEException e) {
 			((HttpServletResponse)response).sendError(500);
 		}
 	}
 
 
-
-	// テスト
-	/*
-
-	*/
-
-	// トークンリフレッシュ
-	//TokenRevocationRequest tokenRefreshRequest = new TokenRevocationRequest(uri, clientAuth, token):
 	@Override
 	public void destroy() {
 
