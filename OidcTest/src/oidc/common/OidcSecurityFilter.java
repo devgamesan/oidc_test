@@ -62,26 +62,34 @@ public class OidcSecurityFilter implements Filter
 		    HttpSession session = httpReq.getSession(false);
 		    String authHeader = httpReq.getHeader("Authorization");
 
-		    if (authHeader != null && !authHeader.equalsIgnoreCase(OidcConst.BEARER)) {
-		    	// Basic認証等他の認証が指定されている場合は次のフィルタへ
-			    chain.doFilter(request, response);
-		    } else if (authHeader != null && authHeader.equalsIgnoreCase(OidcConst.BEARER)) {
-		    	// Bearer認証
-		    	BearerAccessToken accessToken = new BearerAccessToken(authHeader.split(" ")[1]);
-				ClientAuthentication clientAuth = new ClientSecretBasic( new ClientID(opConfig.getClientId()), new Secret(opConfig.getClientSecret()));
-				// アクセストークンのイントロスペクト
-				TokenIntrospectionRequest tokenIntroRequest
-					= new TokenIntrospectionRequest	(new URI(opConfig.getTokenIntrospectEndPoint()),
-							clientAuth, accessToken);
-				TokenIntrospectionResponse tokenIntroResponse = TokenIntrospectionResponse.parse(tokenIntroRequest.toHTTPRequest().send());
-				if (tokenIntroResponse.indicatesSuccess()) {
-					// 認証OK
-					chain.doFilter(request, response);
-				} else {
-					// 認証エラー
-					((HttpServletResponse)response).sendError(401);
+			if (authHeader != null) {
+				String[] authElems = authHeader.split(" ");
+				if (authElems.length != 2) {
+					// Bad Request
+					((HttpServletResponse) response).sendError(400);
 				}
-		    } if (session != null){
+
+				if (!authElems[0].equalsIgnoreCase(OidcConst.BEARER)) {
+					// Basic認証等他の認証が指定されている場合は次のフィルタへ
+					chain.doFilter(request, response);
+				} else if (authElems[0].equalsIgnoreCase(OidcConst.BEARER)) {
+					// Bearer認証
+					BearerAccessToken accessToken = new BearerAccessToken(authElems[1]);
+					ClientAuthentication clientAuth = new ClientSecretBasic(new ClientID(opConfig.getClientId()),
+							new Secret(opConfig.getClientSecret()));
+					// アクセストークンのイントロスペクト
+					TokenIntrospectionRequest tokenIntroRequest = new TokenIntrospectionRequest(	new URI(opConfig.getTokenIntrospectEndPoint()),
+							clientAuth, accessToken);
+					TokenIntrospectionResponse tokenIntroResponse = TokenIntrospectionResponse.parse(tokenIntroRequest.toHTTPRequest().send());
+					if (tokenIntroResponse.indicatesSuccess()) {
+						// 認証OK
+						chain.doFilter(request, response);
+					} else {
+						// 認証エラー
+						((HttpServletResponse) response).sendError(401);
+					}
+				}
+		    } else if (session != null){
 		    	synchronized (session) {
 		    		// Authorization Code Flowで認証済み
 			    	OidcSecurityContext securityContext = (OidcSecurityContext) session.getAttribute(OidcConst.SESSOION_OIDC_SECURITY_CONTEXT);
