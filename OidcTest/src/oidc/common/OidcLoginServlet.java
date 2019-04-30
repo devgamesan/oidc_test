@@ -1,6 +1,5 @@
 package oidc.common;
 import java.io.IOException;
-import java.net.URI;
 import java.net.URISyntaxException;
 
 import javax.servlet.ServletException;
@@ -11,6 +10,9 @@ import javax.servlet.http.HttpServletResponse;
 import com.nimbusds.oauth2.sdk.id.State;
 import com.nimbusds.openid.connect.sdk.Nonce;
 
+/**
+ * RPのログイン用URL
+ */
 public class OidcLoginServlet extends HttpServlet {
 
 
@@ -30,17 +32,8 @@ public class OidcLoginServlet extends HttpServlet {
 				OidcRpConfig rpConfig = new OidcRpConfig();
 
 				// Authorization End Pointにリダイレクト
-				StringBuilder urlBuff = new StringBuilder();
-				urlBuff.append(opConfig.getAuthUrl())
-				.append("?").append(OidcConst.AUTH_REQ_PARAM_RESPONSE_TYPE).append("=").append(OidcConst.AUTH_REQ_RESPONSE_TYPE_CODE)
-				.append("&").append(OidcConst.AUTH_REQ_PARAM_SCOPE).append("=").append("openid")
-				.append("&").append(OidcConst.AUTH_REQ_PARAM_CLIENT_ID).append("=").append(opConfig.getClientId())
-				.append("&").append(OidcConst.AUTH_REQ_PARAM_STATE).append("=").append(state.getValue())
-				.append("&").append(OidcConst.AUTH_REQ_PARAM_NONCE).append("=").append(nonce.getValue())
-				.append("&").append(OidcConst.AUTH_REQ_PARAM_REDIRECT_URI).append("=").append(rpConfig.getCallbackurl());
-
-				URI redirectUri = new URI(urlBuff.toString());
-				response.sendRedirect(redirectUri.toString());
+				OidcHelper helper = new OidcHelper(opConfig, rpConfig);
+				response.sendRedirect(helper.createAutorizationEndPointURL(nonce, state).toString());
 			}
 		} catch (URISyntaxException e) {
 			response.sendError(500);

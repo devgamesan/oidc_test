@@ -1,8 +1,6 @@
 package oidc.common;
 import java.io.IOException;
-import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -11,30 +9,18 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
 import com.nimbusds.jose.JOSEException;
-import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.proc.BadJOSEException;
-import com.nimbusds.jwt.JWT;
-import com.nimbusds.oauth2.sdk.AuthorizationCode;
-import com.nimbusds.oauth2.sdk.AuthorizationCodeGrant;
-import com.nimbusds.oauth2.sdk.AuthorizationGrant;
 import com.nimbusds.oauth2.sdk.ParseException;
 import com.nimbusds.oauth2.sdk.TokenErrorResponse;
-import com.nimbusds.oauth2.sdk.TokenRequest;
 import com.nimbusds.oauth2.sdk.TokenResponse;
-import com.nimbusds.oauth2.sdk.auth.ClientAuthentication;
-import com.nimbusds.oauth2.sdk.auth.ClientSecretBasic;
-import com.nimbusds.oauth2.sdk.auth.Secret;
-import com.nimbusds.oauth2.sdk.id.ClientID;
-import com.nimbusds.oauth2.sdk.id.Issuer;
 import com.nimbusds.oauth2.sdk.token.AccessToken;
 import com.nimbusds.oauth2.sdk.token.RefreshToken;
-import com.nimbusds.openid.connect.sdk.Nonce;
 import com.nimbusds.openid.connect.sdk.OIDCTokenResponse;
-import com.nimbusds.openid.connect.sdk.OIDCTokenResponseParser;
-import com.nimbusds.openid.connect.sdk.validators.IDTokenValidator;
 
+/**
+ * 認証サーバからリダイレクトバックをうけるサーブレット
+ */
 public class OidcCallbackServlet extends HttpServlet {
-
 
 	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
 		try {
@@ -78,35 +64,29 @@ public class OidcCallbackServlet extends HttpServlet {
 				}
 
 				// 認可コード取得
-				String auth_code = request.getParameter(OidcConst.AUTH_REQ_PARAM_CODE);
-				if (auth_code == null) {
+				String authCode = request.getParameter(OidcConst.AUTH_REQ_PARAM_CODE);
+				if (authCode == null) {
 					response.sendRedirect(rpConfig.getLoginUrl());
 				}
 
+				OidcHelper helper = new OidcHelper(opConfig, rpConfig);
+
 				// トークンリクエスト
-				ClientID clientId = new ClientID(opConfig.getClientId());
-				AuthorizationGrant codeGrant = new AuthorizationCodeGrant(new AuthorizationCode(auth_code), new URI(rpConfig.getCallbackurl()));
-				ClientAuthentication clientAuth = new ClientSecretBasic(clientId, new Secret(opConfig.getClientSecret()));
-
-				URI tokenEndpoint = new URI(opConfig.getTokenEndPoint());
-
-				TokenRequest tokenRequest = new TokenRequest(tokenEndpoint, clientAuth, codeGrant);
-
-				TokenResponse tokenResponse = OIDCTokenResponseParser.parse(tokenRequest.toHTTPRequest().send());
+				TokenResponse tokenResponse = helper.sendTokenRequest(authCode);
 
 				if (! tokenResponse.indicatesSuccess()) {
 				    TokenErrorResponse errorResponse = tokenResponse.toErrorResponse();
-				    // TODO Errorハンドリング
 				    response.sendError(500);
 				}
 				OIDCTokenResponse successResponse = (OIDCTokenResponse)tokenResponse.toSuccessResponse();
 
-
 				// IDトークンバリデーション
-				JWT idToken = successResponse.getOIDCTokens().getIDToken();
-				IDTokenValidator idTokenValidator = new IDTokenValidator(new Issuer(opConfig.getIssuer()), clientId,
-						JWSAlgorithm.RS256, new URL(opConfig.getJwksUri()));
-				idTokenValidator.validate(idToken, new Nonce(nonceInSession));
+				try {
+					helper.validateIDToken(successResponse.getOIDCTokens().getIDToken(), nonceInSession);
+				} catch (BadJOSEException e) {
+					// IDトークンがinvalid or 期限切れ
+					response.sendRedirect(rpConfig.getLoginUrl());
+				}
 
 				AccessToken accessToken = successResponse.getOIDCTokens().getAccessToken();
 				RefreshToken refreshToken = successResponse.getOIDCTokens().getRefreshToken();
@@ -118,7 +98,7 @@ public class OidcCallbackServlet extends HttpServlet {
 				// 目的のページにリダイレクトする
 				response.sendRedirect("target.jsp");
 			}
-		} catch (BadJOSEException | JOSEException |IOException | URISyntaxException | ParseException e) {
+		} catch (JOSEException |IOException | URISyntaxException | ParseException e) {
 			response.sendError(500);
 		}
 	}

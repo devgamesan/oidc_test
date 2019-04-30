@@ -20,7 +20,7 @@
   </servlet>
     <servlet>
     <servlet-name>TestServlet</servlet-name>
-    <servlet-class>oidc.common.TestServlet</servlet-class>
+    <servlet-class>oidc.common.OidcTestServlet</servlet-class>
   </servlet>
   <servlet-mapping>
     <servlet-name>LoginUrlServlet</servlet-name>

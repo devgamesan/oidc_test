@@ -3,8 +3,17 @@ package oidc.common;
 import com.nimbusds.oauth2.sdk.token.AccessToken;
 import com.nimbusds.oauth2.sdk.token.RefreshToken;
 
+/**
+ * セッションに保持するアクセストークン/リフレッシュトークン
+ */
 public class OidcSecurityContext {
+	/**
+	 * アクセストークン
+	 */
 	AccessToken accessToken = null;
+	/**
+	 * リフレッシュトークン
+	 */
 	RefreshToken refreshToken = null;
 
 	public AccessToken getAccessToken() {
